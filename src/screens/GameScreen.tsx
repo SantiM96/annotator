@@ -20,26 +20,33 @@ type RootStackParamList = {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Game'>;
 
-type Player = { id: string; name: string; score: number };
+type Player = { id: string; name: string; score: number; played: boolean };
 
 export default function GameScreen({ navigation }: Props) {
-  // --- Estado principal
   const [players, setPlayers] = useState<Player[]>([]);
   const [isAddPlayerOpen, setIsAddPlayerOpen] = useState(false);
   const [newName, setNewName] = useState('');
 
-  // --- Modal para sumar puntos
   const [isAddPointsOpen, setIsAddPointsOpen] = useState(false);
   const [pointsText, setPointsText] = useState('');
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
 
+  const [hand, setHand] = useState(1);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [gameName, setGameName] = useState(() => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `Game ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
+      now.getHours(),
+    )}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  });
+
   const canConfirmPlayer = useMemo(() => newName.trim().length > 0, [newName]);
   const canConfirmPoints = useMemo(
     () => pointsText.trim().length > 0 && !Number.isNaN(Number(pointsText)),
-    [pointsText]
+    [pointsText],
   );
 
-  // Botón del header (arriba a la derecha)
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
@@ -58,6 +65,7 @@ export default function GameScreen({ navigation }: Props) {
       id: `${Date.now()}-${Math.random()}`,
       name: newName.trim(),
       score: 0,
+      played: false,
     };
     setPlayers(prev => [...prev, p]);
     setIsAddPlayerOpen(false);
@@ -66,16 +74,38 @@ export default function GameScreen({ navigation }: Props) {
 
   // --- Add points
   const openAddPoints = (index: number) => {
+    if (players[index].played) return;
     setSelectedIndex(index);
     setPointsText('');
     setIsAddPointsOpen(true);
   };
+
+  const resetWithe = () => {
+    setPlayers(prev => {
+      const copy = [...prev];
+      copy.forEach(p => (p.played = false));
+      return copy;
+    });
+  }
+
   const confirmAddPoints = () => {
     if (!canConfirmPoints || selectedIndex === null) return;
     const delta = Number(pointsText);
     setPlayers(prev => {
       const copy = [...prev];
-      copy[selectedIndex] = { ...copy[selectedIndex], score: copy[selectedIndex].score + delta };
+      copy[selectedIndex] = {
+        ...copy[selectedIndex],
+        score: copy[selectedIndex].score + delta,
+        played: true,
+      };
+
+      // if the round ended (everyone has played), reset "played" and advance the hand
+      const allPlayed = copy.length > 0 && copy.every(p => p.played);
+      if (allPlayed) {
+        copy.forEach(p => (p.played = false));
+        setHand(h => h + 1);
+        resetWithe();
+      }
       return copy;
     });
     setIsAddPointsOpen(false);
@@ -85,9 +115,26 @@ export default function GameScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerSpacer} />
-      <Text style={styles.title}>Game</Text>
+      {/* Header info */}
+      <View style={styles.topRow}>
+        {isEditingName ? (
+          <TextInput
+            value={gameName}
+            onChangeText={setGameName}
+            onSubmitEditing={() => setIsEditingName(false)}
+            onBlur={() => setIsEditingName(false)}
+            autoFocus
+            style={styles.gameNameInput}
+          />
+        ) : (
+          <Pressable onPress={() => setIsEditingName(true)}>
+            <Text style={styles.gameName}>{gameName}</Text>
+          </Pressable>
+        )}
+        <Text style={styles.handText}>Hand: {hand}</Text>
+      </View>
 
+      {/* Players list */}
       {players.length === 0 ? (
         <Text style={styles.emptyHint}>No players yet. Add one!</Text>
       ) : (
@@ -95,30 +142,43 @@ export default function GameScreen({ navigation }: Props) {
           contentContainerStyle={styles.listContent}
           data={players}
           keyExtractor={p => p.id}
-          renderItem={({ item, index }) => (
-            <Pressable
-              onPress={() => openAddPoints(index)}
-              android_ripple={{ color: '#00000010' }}
-              style={({ pressed }) => [styles.playerItem, pressed && styles.playerPressed]}
-            >
-              <View style={styles.leftWrap}>
-                <Text style={styles.playerIndex}>{index + 1}.</Text>
-                <Text style={styles.playerName}>{item.name}</Text>
-              </View>
-              <Text style={styles.playerScore}>{item.score}</Text>
-            </Pressable>
-          )}
+          renderItem={({ item, index }) => {
+            return (
+              <Pressable
+                onPress={() => openAddPoints(index)}
+                disabled={item.played}
+                android_ripple={{ color: '#00000010' }}
+                style={[styles.playerItem, item.played && styles.playerDisabled]}
+              >
+                <View style={styles.leftWrap}>
+                  <Text style={styles.playerIndex}>{index + 1}.</Text>
+                  <Text style={styles.playerName}>{item.name}</Text>
+                </View>
+                <Text style={[styles.playerScore]}>
+                  {item.played ? ' ' : ''}
+                  {item.score}
+                </Text>
+                {/* The space before score is to rerender the component */}
+              </Pressable>
+            );
+          }}
         />
       )}
 
-      {/* Modal: agregar jugador */}
-      <Modal visible={isAddPlayerOpen} transparent animationType="fade" onRequestClose={() => setIsAddPlayerOpen(false)}>
+      {/* MODAL: add player */}
+      <Modal
+        visible={isAddPlayerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsAddPlayerOpen(false)}
+      >
         <KeyboardAvoidingView
           style={styles.modalBackdrop}
           behavior={Platform.select({ ios: 'padding', android: undefined })}
         >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add player</Text>
+
             <TextInput
               placeholder="Player name"
               placeholderTextColor="#9aa3af"
@@ -130,6 +190,7 @@ export default function GameScreen({ navigation }: Props) {
               returnKeyType="done"
               onSubmitEditing={confirmAddPlayer}
             />
+
             <View style={styles.actionsRow}>
               <Pressable onPress={() => setIsAddPlayerOpen(false)} style={[styles.btn, styles.btnGhost]}>
                 <Text style={[styles.btnText, styles.btnGhostText]}>Cancel</Text>
@@ -147,14 +208,20 @@ export default function GameScreen({ navigation }: Props) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal: sumar puntos */}
-      <Modal visible={isAddPointsOpen} transparent animationType="fade" onRequestClose={() => setIsAddPointsOpen(false)}>
+      {/* MODAL: add points */}
+      <Modal
+        visible={isAddPointsOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsAddPointsOpen(false)}
+      >
         <KeyboardAvoidingView
           style={styles.modalBackdrop}
           behavior={Platform.select({ ios: 'padding', android: undefined })}
         >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add points</Text>
+
             <TextInput
               placeholder="e.g. 5  (use -3 to subtract)"
               placeholderTextColor="#9aa3af"
@@ -166,6 +233,7 @@ export default function GameScreen({ navigation }: Props) {
               returnKeyType="done"
               onSubmitEditing={confirmAddPoints}
             />
+
             <View style={styles.actionsRow}>
               <Pressable onPress={() => setIsAddPointsOpen(false)} style={[styles.btn, styles.btnGhost]}>
                 <Text style={[styles.btnText, styles.btnGhostText]}>Cancel</Text>
@@ -188,16 +256,27 @@ export default function GameScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f7f7fb' },
-  headerSpacer: { height: 8 },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 16,
-    color: '#111827',
+  topRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 12,
   },
-  emptyHint: { textAlign: 'center', color: '#6b7280', marginTop: 8 },
+  gameName: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  gameNameInput: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 16,
+    minWidth: 150,
+  },
+  handText: { fontSize: 16, fontWeight: '600', color: '#374151' },
 
+  emptyHint: { textAlign: 'center', color: '#6b7280', marginTop: 8 },
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
 
   playerItem: {
@@ -214,13 +293,12 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
   },
-  playerPressed: { opacity: 0.9 },
-  leftWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  playerDisabled: { backgroundColor: '#e5e7eb' },
+  leftWrap: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   playerIndex: { width: 22, textAlign: 'right', marginRight: 8, color: '#6b7280' },
   playerName: { fontSize: 16, fontWeight: '600', color: '#111827' },
-  playerScore: { fontSize: 16, fontWeight: '700', color: '#ef4444' },
+  playerScore: { fontSize: 16, fontWeight: '700', color: '#111827' },
 
-  // Header button
   headerBtn: {
     paddingVertical: 6,
     paddingHorizontal: 10,
@@ -229,7 +307,6 @@ const styles = StyleSheet.create({
   },
   headerBtnText: { color: 'white', fontWeight: '700' },
 
-  // Modal base
   modalBackdrop: {
     flex: 1,
     backgroundColor: '#00000055',
@@ -248,7 +325,6 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   actionsRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 14 },
-
   btn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10 },
   btnPrimary: { backgroundColor: '#2563eb' },
   btnDisabled: { backgroundColor: '#9ca3af' },

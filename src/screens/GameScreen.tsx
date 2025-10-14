@@ -1,4 +1,11 @@
-import React, { useEffect, useLayoutEffect, useMemo, useState, useCallback } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+} from 'react';
 import {
   View,
   Text,
@@ -42,30 +49,51 @@ export default function GameScreen({ navigation, route }: Props) {
     )}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   });
 
+  // Tracks last delta per player for the current hand (used by Ctrl+Z).
+  const [handDeltas, setHandDeltas] = useState<Record<string, number>>({});
+
+  // Exception modal state (long press).
+  const [isAdjustOpen, setIsAdjustOpen] = useState(false);
+  const [adjustText, setAdjustText] = useState('');
+  const [adjustIndex, setAdjustIndex] = useState<number | null>(null);
+
+  // Prevents onPress firing after onLongPress.
+  const longPressGuard = useRef(false);
+
   const canConfirmPlayer = useMemo(() => newName.trim().length > 0, [newName]);
   const canConfirmPoints = useMemo(
     () => pointsText.trim().length > 0 && !Number.isNaN(Number(pointsText)),
     [pointsText],
   );
+  const canConfirmAdjust = useMemo(
+    () => adjustText.trim().length > 0 && !Number.isNaN(Number(adjustText)),
+    [adjustText],
+  );
 
-  // Stable handler for header button
+  // Shows Ctrl+Z only when the selected player is marked as played.
+  const canShowUndo = useMemo(() => {
+    if (adjustIndex === null) return false;
+    return !!players[adjustIndex]?.played;
+  }, [adjustIndex, players]);
+
+  // Stable handler for header button.
   const openAddPlayerModal = useCallback(() => {
     setIsAddPlayerOpen(true);
   }, []);
 
-  // Memoized header content to avoid unstable nested components warning
+  // Memoized header content.
   const headerRightNode = useMemo(
     () => (
       <View style={styles.headerRightRow}>
         <Pressable onPress={openAddPlayerModal} style={[styles.headerBtn, styles.headerBtnMargin]}>
-          <Text style={styles.headerBtnText}>+ Add player</Text>
+          <Text style={styles.headerBtnText}>＋ Add player</Text>
         </Pressable>
       </View>
     ),
     [openAddPlayerModal],
   );
 
-  // Header options
+  // Header options.
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => headerRightNode,
@@ -73,7 +101,7 @@ export default function GameScreen({ navigation, route }: Props) {
     });
   }, [navigation, headerRightNode]);
 
-  // Load when entering with resume=true
+  // Load when entering with resume=true.
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -83,6 +111,7 @@ export default function GameScreen({ navigation, route }: Props) {
           setGameName(snapshot.gameName);
           setHand(snapshot.hand);
           setPlayers(snapshot.players);
+          setHandDeltas({});
         }
       }
     })();
@@ -91,21 +120,15 @@ export default function GameScreen({ navigation, route }: Props) {
     };
   }, [route.params]);
 
-  // Autosave whenever relevant state changes
+  // Autosave when state changes.
   useEffect(() => {
-    const snapshot: GameSave = {
-      gameName,
-      hand,
-      players,
-      savedAt: Date.now(),
-    };
-    // Avoid saving an empty initial state with no players unless the user has typed a name change.
+    const snapshot: GameSave = { gameName, hand, players, savedAt: Date.now() };
     if (players.length > 0 || hand !== 1 || gameName.startsWith('Game ') === false) {
       saveCurrentGame(snapshot).catch(() => {});
     }
   }, [players, hand, gameName]);
 
-  // Add player
+  // Add player.
   const confirmAddPlayer = () => {
     if (!canConfirmPlayer) return;
     const p: Player = {
@@ -119,7 +142,7 @@ export default function GameScreen({ navigation, route }: Props) {
     setNewName('');
   };
 
-  // Add points
+  // Add points (regular tap).
   const openAddPoints = (index: number) => {
     if (players[index].played) return;
     setSelectedIndex(index);
@@ -132,16 +155,18 @@ export default function GameScreen({ navigation, route }: Props) {
     const delta = Number(pointsText);
     setPlayers(prev => {
       const copy = [...prev];
-      copy[selectedIndex] = {
-        ...copy[selectedIndex],
-        score: copy[selectedIndex].score + delta,
+      const pid = copy[selectedIndex!].id;
+      copy[selectedIndex!] = {
+        ...copy[selectedIndex!],
+        score: copy[selectedIndex!].score + delta,
         played: true,
       };
-
+      setHandDeltas(d => ({ ...d, [pid]: delta }));
       const allPlayed = copy.length > 0 && copy.every(p => p.played);
       if (allPlayed) {
         copy.forEach(p => (p.played = false));
         setHand(h => h + 1);
+        setHandDeltas({});
       }
       return copy;
     });
@@ -149,6 +174,53 @@ export default function GameScreen({ navigation, route }: Props) {
     setSelectedIndex(null);
     setPointsText('');
   };
+
+  // Exception flow (long press).
+  const openAdjust = (index: number) => {
+    setAdjustIndex(index);
+    setAdjustText('');
+    setIsAdjustOpen(true);
+  };
+
+  const confirmAdjust = () => {
+    if (!canConfirmAdjust || adjustIndex === null) return;
+    const delta = Number(adjustText);
+    setPlayers(prev => {
+      const copy = [...prev];
+      copy[adjustIndex!] = {
+        ...copy[adjustIndex!],
+        score: copy[adjustIndex!].score + delta,
+      };
+      return copy;
+    });
+    setIsAdjustOpen(false);
+    setAdjustIndex(null);
+    setAdjustText('');
+  };
+
+  const undoLastForCurrentHand = () => {
+  if (adjustIndex === null) return;
+  setPlayers(prev => {
+    const copy = [...prev];
+    const pid = copy[adjustIndex].id;
+    const last = handDeltas[pid] ?? 0;
+
+    copy[adjustIndex] = {
+      ...copy[adjustIndex],
+      score: copy[adjustIndex].score - last,
+      played: false,
+    };
+
+    const next = { ...handDeltas };
+    delete next[pid];
+    setHandDeltas(next);
+
+    return copy;
+  });
+  setIsAdjustOpen(false);
+  setAdjustIndex(null);
+  setAdjustText('');
+};
 
   return (
     <View style={styles.container}>
@@ -181,10 +253,25 @@ export default function GameScreen({ navigation, route }: Props) {
           keyExtractor={p => p.id}
           extraData={players.map(p => p.played).join(',')} // Force child re-render when played toggles
           renderItem={({ item, index }) => {
+            const handlePress = () => {
+              if (longPressGuard.current) {
+                longPressGuard.current = false;
+                return;
+              }
+              if (!item.played) openAddPoints(index);
+            };
+            const handleLongPress = () => {
+              longPressGuard.current = true;
+              openAdjust(index);
+              setTimeout(() => {
+                longPressGuard.current = false;
+              }, 250);
+            };
             return (
               <Pressable
-                onPress={() => openAddPoints(index)}
-                disabled={item.played}
+                onPress={handlePress}
+                onLongPress={handleLongPress}
+                delayLongPress={2000}
                 android_ripple={{ color: '#00000010' }}
                 style={[styles.playerItem, item.played && styles.playerDisabled]}
               >
@@ -236,6 +323,62 @@ export default function GameScreen({ navigation, route }: Props) {
                 style={[styles.btn, canConfirmPlayer ? styles.btnPrimary : styles.btnDisabled]}
               >
                 <Text style={[styles.btnText, !canConfirmPlayer && styles.btnTextDisabled]}>Confirm</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* MODAL: exception (long press) */}
+      <Modal
+        visible={isAdjustOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsAdjustOpen(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.select({ ios: 'padding', android: undefined })}
+        >
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Adjust score</Text>
+
+            <TextInput
+              placeholder="Enter a number (e.g., -3 or 5)"
+              placeholderTextColor="#9aa3af"
+              value={adjustText}
+              onChangeText={setAdjustText}
+              keyboardType={Platform.select({ ios: 'numbers-and-punctuation', android: 'numeric' })}
+              autoFocus
+              style={styles.input}
+              returnKeyType="done"
+              onSubmitEditing={confirmAdjust}
+            />
+
+            <View style={styles.actionsRow}>
+              <Pressable onPress={() => setIsAdjustOpen(false)} style={[styles.btn, styles.btnGhost]}>
+                <Text style={[styles.btnText, styles.btnGhostText]}>Cancel</Text>
+              </Pressable>
+
+              {canShowUndo && (
+                <>
+                  <View style={{ width: 10 }} />
+                  <Pressable
+                    onPress={undoLastForCurrentHand}
+                    style={[styles.btn, styles.btnDanger]}
+                  >
+                    <Text style={styles.btnText}>Ctrl + Z</Text>
+                  </Pressable>
+                </>
+              )}
+
+              <View style={{ width: 10 }} />
+              <Pressable
+                onPress={confirmAdjust}
+                disabled={!canConfirmAdjust}
+                style={[styles.btn, canConfirmAdjust ? styles.btnPrimary : styles.btnDisabled]}
+              >
+                <Text style={[styles.btnText, !canConfirmAdjust && styles.btnTextDisabled]}>Confirm</Text>
               </Pressable>
             </View>
           </View>
@@ -364,6 +507,7 @@ const styles = StyleSheet.create({
   btn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10 },
   btnPrimary: { backgroundColor: '#2563eb' },
   btnDisabled: { backgroundColor: '#9ca3af' },
+  btnDanger: { backgroundColor: '#ef4444' },
   btnTextDisabled: { color: '#e5e7eb' },
   btnText: { color: 'white', fontSize: 15, fontWeight: '700' },
   btnGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#d1d5db' },

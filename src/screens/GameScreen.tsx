@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,10 +11,11 @@ import {
   Platform,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { loadCurrentGame, saveCurrentGame, type GameSave } from '../storage/gameStorage';
 
 type RootStackParamList = {
   Home: undefined;
-  Game: undefined;
+  Game: { resume?: boolean } | undefined;
   History: undefined;
 };
 
@@ -22,7 +23,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Game'>;
 
 type Player = { id: string; name: string; score: number; played: boolean };
 
-export default function GameScreen({ navigation }: Props) {
+export default function GameScreen({ navigation, route }: Props) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [isAddPlayerOpen, setIsAddPlayerOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -47,18 +48,64 @@ export default function GameScreen({ navigation }: Props) {
     [pointsText],
   );
 
+  // Stable handler for header button
+  const openAddPlayerModal = useCallback(() => {
+    setIsAddPlayerOpen(true);
+  }, []);
+
+  // Memoized header content to avoid unstable nested components warning
+  const headerRightNode = useMemo(
+    () => (
+      <View style={styles.headerRightRow}>
+        <Pressable onPress={openAddPlayerModal} style={[styles.headerBtn, styles.headerBtnMargin]}>
+          <Text style={styles.headerBtnText}>+ Add player</Text>
+        </Pressable>
+      </View>
+    ),
+    [openAddPlayerModal],
+  );
+
+  // Header options
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerRight: () => (
-        <Pressable onPress={() => setIsAddPlayerOpen(true)} style={styles.headerBtn}>
-          <Text style={styles.headerBtnText}>＋ Add player</Text>
-        </Pressable>
-      ),
+      headerRight: () => headerRightNode,
       title: 'Game',
     });
-  }, [navigation]);
+  }, [navigation, headerRightNode]);
 
-  // --- Add player
+  // Load when entering with resume=true
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (route.params?.resume) {
+        const snapshot = await loadCurrentGame();
+        if (snapshot && mounted) {
+          setGameName(snapshot.gameName);
+          setHand(snapshot.hand);
+          setPlayers(snapshot.players);
+        }
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [route.params]);
+
+  // Autosave whenever relevant state changes
+  useEffect(() => {
+    const snapshot: GameSave = {
+      gameName,
+      hand,
+      players,
+      savedAt: Date.now(),
+    };
+    // Avoid saving an empty initial state with no players unless the user has typed a name change.
+    if (players.length > 0 || hand !== 1 || gameName.startsWith('Game ') === false) {
+      saveCurrentGame(snapshot).catch(() => {});
+    }
+  }, [players, hand, gameName]);
+
+  // Add player
   const confirmAddPlayer = () => {
     if (!canConfirmPlayer) return;
     const p: Player = {
@@ -72,21 +119,13 @@ export default function GameScreen({ navigation }: Props) {
     setNewName('');
   };
 
-  // --- Add points
+  // Add points
   const openAddPoints = (index: number) => {
     if (players[index].played) return;
     setSelectedIndex(index);
     setPointsText('');
     setIsAddPointsOpen(true);
   };
-
-  const resetWithe = () => {
-    setPlayers(prev => {
-      const copy = [...prev];
-      copy.forEach(p => (p.played = false));
-      return copy;
-    });
-  }
 
   const confirmAddPoints = () => {
     if (!canConfirmPoints || selectedIndex === null) return;
@@ -99,12 +138,10 @@ export default function GameScreen({ navigation }: Props) {
         played: true,
       };
 
-      // if the round ended (everyone has played), reset "played" and advance the hand
       const allPlayed = copy.length > 0 && copy.every(p => p.played);
       if (allPlayed) {
         copy.forEach(p => (p.played = false));
         setHand(h => h + 1);
-        resetWithe();
       }
       return copy;
     });
@@ -142,6 +179,7 @@ export default function GameScreen({ navigation }: Props) {
           contentContainerStyle={styles.listContent}
           data={players}
           keyExtractor={p => p.id}
+          extraData={players.map(p => p.played).join(',')} // Force child re-render when played toggles
           renderItem={({ item, index }) => {
             return (
               <Pressable
@@ -154,11 +192,7 @@ export default function GameScreen({ navigation }: Props) {
                   <Text style={styles.playerIndex}>{index + 1}.</Text>
                   <Text style={styles.playerName}>{item.name}</Text>
                 </View>
-                <Text style={[styles.playerScore]}>
-                  {item.played ? ' ' : ''}
-                  {item.score}
-                </Text>
-                {/* The space before score is to rerender the component */}
+                <Text style={styles.playerScore}>{item.played ? ' ' : ''}{item.score}</Text>
               </Pressable>
             );
           }}
@@ -299,12 +333,14 @@ const styles = StyleSheet.create({
   playerName: { fontSize: 16, fontWeight: '600', color: '#111827' },
   playerScore: { fontSize: 16, fontWeight: '700', color: '#111827' },
 
+  headerRightRow: { flexDirection: 'row' },
   headerBtn: {
     paddingVertical: 6,
     paddingHorizontal: 10,
     backgroundColor: '#2563eb',
     borderRadius: 999,
   },
+  headerBtnMargin: { marginRight: 8 },
   headerBtnText: { color: 'white', fontWeight: '700' },
 
   modalBackdrop: {

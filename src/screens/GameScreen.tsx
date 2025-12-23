@@ -18,7 +18,11 @@ import {
   Platform,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { loadCurrentGame, saveCurrentGame, type GameSave } from '../storage/gameStorage';
+import {
+  loadCurrentGame,
+  saveCurrentGame,
+  type GameSave,
+} from '../storage/gameStorage';
 
 type RootStackParamList = {
   Home: undefined;
@@ -28,7 +32,13 @@ type RootStackParamList = {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Game'>;
 
-type Player = { id: string; name: string; score: number; played: boolean };
+type Player = {
+  id: string;
+  name: string;
+  score: number;
+  played: boolean;
+  lost: boolean;
+};
 
 export default function GameScreen({ navigation, route }: Props) {
   const [players, setPlayers] = useState<Player[]>([]);
@@ -44,12 +54,14 @@ export default function GameScreen({ navigation, route }: Props) {
   const [gameName, setGameName] = useState(() => {
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
-    return `Game ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(
-      now.getHours(),
-    )}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    return `Game ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+      now.getDate(),
+    )} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(
+      now.getSeconds(),
+    )}`;
   });
 
-  // Tracks last delta per player for the current hand (used by Ctrl+Z).
+  // Tracks last delta per player for the current hand.
   const [handDeltas, setHandDeltas] = useState<Record<string, number>>({});
 
   // Exception modal state (long press).
@@ -57,43 +69,94 @@ export default function GameScreen({ navigation, route }: Props) {
   const [adjustText, setAdjustText] = useState('');
   const [adjustIndex, setAdjustIndex] = useState<number | null>(null);
 
-  // Prevents onPress firing after onLongPress.
+  // Header menu (kebab).
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+
+  // Confirm reset modal.
+  const [isConfirmResetOpen, setIsConfirmResetOpen] = useState(false);
+
+  // Prevent onPress after onLongPress.
   const longPressGuard = useRef(false);
 
-  const canConfirmPlayer = useMemo(() => newName.trim().length > 0, [newName]);
+  // QoL: reliable focus for Add Points input.
+  const pointsInputRef = useRef<TextInput | null>(null);
+
+  // QoL: triple tap detector.
+  const tripleTapRef = useRef<{
+    lastPid: string | null;
+    count: number;
+    timer: ReturnType<typeof setTimeout> | null;
+  }>({ lastPid: null, count: 0, timer: null });
+
+  const canConfirmPlayer = useMemo(
+    () => newName.trim().length > 0,
+    [newName],
+  );
+
   const canConfirmPoints = useMemo(
-    () => pointsText.trim().length > 0 && !Number.isNaN(Number(pointsText)),
+    () =>
+      pointsText.trim().length > 0 &&
+      !Number.isNaN(Number(pointsText)),
     [pointsText],
   );
+
   const canConfirmAdjust = useMemo(
-    () => adjustText.trim().length > 0 && !Number.isNaN(Number(adjustText)),
+    () =>
+      adjustText.trim().length > 0 &&
+      !Number.isNaN(Number(adjustText)),
     [adjustText],
   );
 
-  // Shows Ctrl+Z only when the selected player is marked as played.
   const canShowUndo = useMemo(() => {
     if (adjustIndex === null) return false;
     return !!players[adjustIndex]?.played;
   }, [adjustIndex, players]);
 
-  // Stable handler for header button.
+  // Show footer add-player only when there are players and everyone has score 0.
+  const showFooterAddPlayer = useMemo(() => {
+    if (players.length === 0) return false;
+    return players.every(p => p.score === 0);
+  }, [players]);
+
   const openAddPlayerModal = useCallback(() => {
+    setIsHeaderMenuOpen(false);
     setIsAddPlayerOpen(true);
   }, []);
 
-  // Memoized header content.
+  const startRenameGame = useCallback(() => {
+    setIsHeaderMenuOpen(false);
+    setIsEditingName(true);
+  }, []);
+
+  const openConfirmReset = useCallback(() => {
+    setIsHeaderMenuOpen(false);
+    setIsConfirmResetOpen(true);
+  }, []);
+
+  const performReset = useCallback(() => {
+    setPlayers(prev =>
+      prev.map(p => ({ ...p, score: 0, played: false })),
+    );
+    setHand(1);
+    setHandDeltas({});
+    setIsConfirmResetOpen(false);
+  }, []);
+
   const headerRightNode = useMemo(
     () => (
       <View style={styles.headerRightRow}>
-        <Pressable onPress={openAddPlayerModal} style={[styles.headerBtn, styles.headerBtnMargin]}>
-          <Text style={styles.headerBtnText}>＋ Add player</Text>
+        <Pressable
+          onPress={() => setTimeout(() => setIsHeaderMenuOpen(true), 0)}
+          style={[styles.kebabBtn, styles.headerBtnMargin]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.kebabText}>⋮</Text>
         </Pressable>
       </View>
     ),
-    [openAddPlayerModal],
+    [],
   );
 
-  // Header options.
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => headerRightNode,
@@ -101,16 +164,23 @@ export default function GameScreen({ navigation, route }: Props) {
     });
   }, [navigation, headerRightNode]);
 
-  // Load when entering with resume=true.
   useEffect(() => {
     let mounted = true;
     (async () => {
       if (route.params?.resume) {
         const snapshot = await loadCurrentGame();
         if (snapshot && mounted) {
+          const restoredPlayers: Player[] = snapshot.players.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            score: typeof p.score === 'number' ? p.score : Number(p.score) || 0,
+            played: typeof p.played === 'boolean' ? p.played : false,
+            lost: typeof p.lost === 'boolean' ? p.lost : false,
+          }));
+          
           setGameName(snapshot.gameName);
           setHand(snapshot.hand);
-          setPlayers(snapshot.players);
+          setPlayers(restoredPlayers);
           setHandDeltas({});
         }
       }
@@ -120,15 +190,22 @@ export default function GameScreen({ navigation, route }: Props) {
     };
   }, [route.params]);
 
-  // Autosave when state changes.
   useEffect(() => {
-    const snapshot: GameSave = { gameName, hand, players, savedAt: Date.now() };
-    if (players.length > 0 || hand !== 1 || gameName.startsWith('Game ') === false) {
+    const snapshot: GameSave = {
+      gameName,
+      hand,
+      players,
+      savedAt: Date.now(),
+    };
+    if (
+      players.length > 0 ||
+      hand !== 1 ||
+      gameName.startsWith('Game ') === false
+    ) {
       saveCurrentGame(snapshot).catch(() => {});
     }
   }, [players, hand, gameName]);
 
-  // Add player.
   const confirmAddPlayer = () => {
     if (!canConfirmPlayer) return;
     const p: Player = {
@@ -136,13 +213,13 @@ export default function GameScreen({ navigation, route }: Props) {
       name: newName.trim(),
       score: 0,
       played: false,
+      lost: false,
     };
     setPlayers(prev => [...prev, p]);
     setIsAddPlayerOpen(false);
     setNewName('');
   };
 
-  // Add points (regular tap).
   const openAddPoints = (index: number) => {
     if (players[index].played) return;
     setSelectedIndex(index);
@@ -150,32 +227,45 @@ export default function GameScreen({ navigation, route }: Props) {
     setIsAddPointsOpen(true);
   };
 
-  const confirmAddPoints = () => {
-    if (!canConfirmPoints || selectedIndex === null) return;
-    const delta = Number(pointsText);
+  const applyDeltaToPlayer = useCallback((index: number, delta: number) => {
     setPlayers(prev => {
       const copy = [...prev];
-      const pid = copy[selectedIndex!].id;
-      copy[selectedIndex!] = {
-        ...copy[selectedIndex!],
-        score: copy[selectedIndex!].score + delta,
+      const pid = copy[index].id;
+
+      copy[index] = {
+        ...copy[index],
+        score: copy[index].score + delta,
         played: true,
       };
+
       setHandDeltas(d => ({ ...d, [pid]: delta }));
+
       const allPlayed = copy.length > 0 && copy.every(p => p.played);
       if (allPlayed) {
         copy.forEach(p => (p.played = false));
         setHand(h => h + 1);
         setHandDeltas({});
       }
+
       return copy;
     });
+  }, []);
+
+  const confirmAddPoints = () => {
+    if (!canConfirmPoints || selectedIndex === null) return;
+    const delta = Number(pointsText);
+    applyDeltaToPlayer(selectedIndex, delta);
+
     setIsAddPointsOpen(false);
     setSelectedIndex(null);
     setPointsText('');
   };
 
-  // Exception flow (long press).
+  const addZeroQuick = (index: number) => {
+    if (players[index]?.played) return;
+    applyDeltaToPlayer(index, 0);
+  };
+
   const openAdjust = (index: number) => {
     setAdjustIndex(index);
     setAdjustText('');
@@ -187,9 +277,9 @@ export default function GameScreen({ navigation, route }: Props) {
     const delta = Number(adjustText);
     setPlayers(prev => {
       const copy = [...prev];
-      copy[adjustIndex!] = {
-        ...copy[adjustIndex!],
-        score: copy[adjustIndex!].score + delta,
+      copy[adjustIndex] = {
+        ...copy[adjustIndex],
+        score: copy[adjustIndex].score + delta,
       };
       return copy;
     });
@@ -199,32 +289,66 @@ export default function GameScreen({ navigation, route }: Props) {
   };
 
   const undoLastForCurrentHand = () => {
-  if (adjustIndex === null) return;
-  setPlayers(prev => {
-    const copy = [...prev];
-    const pid = copy[adjustIndex].id;
-    const last = handDeltas[pid] ?? 0;
+    if (adjustIndex === null) return;
+    setPlayers(prev => {
+      const copy = [...prev];
+      const pid = copy[adjustIndex].id;
+      const last = handDeltas[pid] ?? 0;
 
-    copy[adjustIndex] = {
-      ...copy[adjustIndex],
-      score: copy[adjustIndex].score - last,
-      played: false,
-    };
+      copy[adjustIndex] = {
+        ...copy[adjustIndex],
+        score: copy[adjustIndex].score - last,
+        played: false,
+      };
 
-    const next = { ...handDeltas };
-    delete next[pid];
-    setHandDeltas(next);
+      const next = { ...handDeltas };
+      delete next[pid];
+      setHandDeltas(next);
 
-    return copy;
-  });
-  setIsAdjustOpen(false);
-  setAdjustIndex(null);
-  setAdjustText('');
-};
+      return copy;
+    });
+    setIsAdjustOpen(false);
+    setAdjustIndex(null);
+    setAdjustText('');
+  };
+
+  const renderFooter = () =>
+    showFooterAddPlayer ? (
+      <View style={styles.footerWrap}>
+        <Pressable
+          onPress={openAddPlayerModal}
+          style={[styles.footerBtn, styles.btnPrimary]}
+        >
+          <Text style={styles.footerBtnText}>＋ Add player</Text>
+        </Pressable>
+      </View>
+    ) : (
+      <View style={{ height: 12 }} />
+    );
+
+  const renderEmpty = () => (
+    <View style={styles.emptyWrap}>
+      <Text style={styles.emptyHint}>No players yet. Add one!</Text>
+      <View style={{ height: 12 }} />
+      <Pressable
+        onPress={openAddPlayerModal}
+        style={[styles.footerBtn, styles.btnPrimary]}
+      >
+        <Text style={styles.footerBtnText}>＋ Add player</Text>
+      </Pressable>
+    </View>
+  );
+
+  const focusPointsInput = () => {
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        pointsInputRef.current?.focus();
+      }, 0);
+    });
+  };
 
   return (
     <View style={styles.container}>
-      {/* Header info */}
       <View style={styles.topRow}>
         {isEditingName ? (
           <TextInput
@@ -243,50 +367,166 @@ export default function GameScreen({ navigation, route }: Props) {
         <Text style={styles.handText}>Hand: {hand}</Text>
       </View>
 
-      {/* Players list */}
-      {players.length === 0 ? (
-        <Text style={styles.emptyHint}>No players yet. Add one!</Text>
-      ) : (
-        <FlatList
-          contentContainerStyle={styles.listContent}
-          data={players}
-          keyExtractor={p => p.id}
-          extraData={players.map(p => p.played).join(',')} // Force child re-render when played toggles
-          renderItem={({ item, index }) => {
-            const handlePress = () => {
-              if (longPressGuard.current) {
-                longPressGuard.current = false;
-                return;
-              }
-              if (!item.played) openAddPoints(index);
-            };
-            const handleLongPress = () => {
-              longPressGuard.current = true;
-              openAdjust(index);
-              setTimeout(() => {
-                longPressGuard.current = false;
-              }, 250);
-            };
-            return (
-              <Pressable
-                onPress={handlePress}
-                onLongPress={handleLongPress}
-                delayLongPress={2000}
-                android_ripple={{ color: '#00000010' }}
-                style={[styles.playerItem, item.played && styles.playerDisabled]}
-              >
-                <View style={styles.leftWrap}>
-                  <Text style={styles.playerIndex}>{index + 1}.</Text>
-                  <Text style={styles.playerName}>{item.name}</Text>
-                </View>
-                <Text style={styles.playerScore}>{item.played ? ' ' : ''}{item.score}</Text>
-              </Pressable>
-            );
-          }}
-        />
-      )}
+      <FlatList
+        contentContainerStyle={styles.listContent}
+        data={players}
+        keyExtractor={p => p.id}
+        extraData={players.map(p => p.played).join(',')}
+        renderItem={({ item, index }) => {
+          const clearTripleTapTimer = () => {
+            if (tripleTapRef.current.timer) {
+              clearTimeout(tripleTapRef.current.timer);
+              tripleTapRef.current.timer = null;
+            }
+          };
 
-      {/* MODAL: add player */}
+          const resetTripleTap = () => {
+            tripleTapRef.current.lastPid = null;
+            tripleTapRef.current.count = 0;
+            clearTripleTapTimer();
+          };
+
+          const handlePress = () => {
+            if (longPressGuard.current) {
+              longPressGuard.current = false;
+              return;
+            }
+            if (item.played) return;
+
+            const pid = item.id;
+            const t = tripleTapRef.current;
+
+            if (t.lastPid !== pid) {
+              t.lastPid = pid;
+              t.count = 0;
+            }
+
+            t.count += 1;
+            clearTripleTapTimer();
+
+            if (t.count === 3) {
+              resetTripleTap();
+              addZeroQuick(index);
+              return;
+            }
+
+            t.timer = setTimeout(() => {
+              resetTripleTap();
+              openAddPoints(index);
+            }, 300);
+          };
+
+          const handleLongPress = () => {
+            clearTripleTapTimer();
+
+            longPressGuard.current = true;
+            openAdjust(index);
+            setTimeout(() => {
+              longPressGuard.current = false;
+            }, 250);
+          };
+
+          return (
+            <Pressable
+              onPress={handlePress}
+              onLongPress={handleLongPress}
+              delayLongPress={2000}
+              android_ripple={{ color: '#00000010' }}
+              style={[
+                styles.playerItem,
+                item.played && styles.playerDisabled,
+              ]}
+            >
+              <View style={styles.leftWrap}>
+                <Text style={styles.playerIndex}>{index + 1}.</Text>
+                <Text style={styles.playerName}>{item.name}</Text>
+              </View>
+              <Text style={styles.playerScore}>
+                {item.played ? ' ' : ''}
+                {item.score}
+              </Text>
+            </Pressable>
+          );
+        }}
+        ListEmptyComponent={renderEmpty}
+        ListFooterComponent={renderFooter}
+      />
+
+      <Modal
+        visible={isHeaderMenuOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setIsHeaderMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.menuBackdrop}
+          onPress={() => setIsHeaderMenuOpen(false)}
+        />
+        <View pointerEvents="box-none" style={styles.menuContainer}>
+          <View style={styles.menuCard}>
+            <Pressable onPress={openAddPlayerModal} style={styles.menuItem}>
+              <Text style={styles.menuItemText}>Add player</Text>
+            </Pressable>
+            <Pressable onPress={startRenameGame} style={styles.menuItem}>
+              <Text style={styles.menuItemText}>Rename game</Text>
+            </Pressable>
+            <Pressable onPress={openConfirmReset} style={styles.menuItem}>
+              <Text style={[styles.menuItemText, styles.menuDanger]}>
+                Reset
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setIsHeaderMenuOpen(false)}
+              style={styles.menuItem}
+            >
+              <Text style={[styles.menuItemText, styles.menuCancel]}>
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isConfirmResetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsConfirmResetOpen(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.select({
+            ios: 'padding',
+            android: undefined,
+          })}
+        >
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Reset game?</Text>
+            <Text style={{ color: '#374151', marginBottom: 10 }}>
+              This will set Hand to 1 and all scores to 0.
+            </Text>
+
+            <View style={styles.actionsRow}>
+              <Pressable
+                onPress={() => setIsConfirmResetOpen(false)}
+                style={[styles.btn, styles.btnGhost]}
+              >
+                <Text style={[styles.btnText, styles.btnGhostText]}>
+                  Cancel
+                </Text>
+              </Pressable>
+              <View style={{ width: 10 }} />
+              <Pressable
+                onPress={performReset}
+                style={[styles.btn, styles.btnDanger]}
+              >
+                <Text style={styles.btnText}>Confirm</Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <Modal
         visible={isAddPlayerOpen}
         transparent
@@ -295,7 +535,10 @@ export default function GameScreen({ navigation, route }: Props) {
       >
         <KeyboardAvoidingView
           style={styles.modalBackdrop}
-          behavior={Platform.select({ ios: 'padding', android: undefined })}
+          behavior={Platform.select({
+            ios: 'padding',
+            android: undefined,
+          })}
         >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add player</Text>
@@ -305,31 +548,46 @@ export default function GameScreen({ navigation, route }: Props) {
               placeholderTextColor="#9aa3af"
               value={newName}
               onChangeText={setNewName}
-              autoCapitalize="words"
               autoFocus
-              style={styles.input}
+              style={[styles.input, { marginBottom: 10 }]}
               returnKeyType="done"
               onSubmitEditing={confirmAddPlayer}
             />
 
             <View style={styles.actionsRow}>
-              <Pressable onPress={() => setIsAddPlayerOpen(false)} style={[styles.btn, styles.btnGhost]}>
-                <Text style={[styles.btnText, styles.btnGhostText]}>Cancel</Text>
+              <Pressable
+                onPress={() => setIsAddPlayerOpen(false)}
+                style={[styles.btn, styles.btnGhost]}
+              >
+                <Text style={[styles.btnText, styles.btnGhostText]}>
+                  Cancel
+                </Text>
               </Pressable>
               <View style={{ width: 10 }} />
               <Pressable
                 onPress={confirmAddPlayer}
                 disabled={!canConfirmPlayer}
-                style={[styles.btn, canConfirmPlayer ? styles.btnPrimary : styles.btnDisabled]}
+                style={[
+                  styles.btn,
+                  canConfirmPlayer
+                    ? styles.btnPrimary
+                    : styles.btnDisabled,
+                ]}
               >
-                <Text style={[styles.btnText, !canConfirmPlayer && styles.btnTextDisabled]}>Confirm</Text>
+                <Text
+                  style={[
+                    styles.btnText,
+                    !canConfirmPlayer && styles.btnTextDisabled,
+                  ]}
+                >
+                  Add
+                </Text>
               </Pressable>
             </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL: exception (long press) */}
       <Modal
         visible={isAdjustOpen}
         transparent
@@ -338,7 +596,10 @@ export default function GameScreen({ navigation, route }: Props) {
       >
         <KeyboardAvoidingView
           style={styles.modalBackdrop}
-          behavior={Platform.select({ ios: 'padding', android: undefined })}
+          behavior={Platform.select({
+            ios: 'padding',
+            android: undefined,
+          })}
         >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Adjust score</Text>
@@ -348,7 +609,10 @@ export default function GameScreen({ navigation, route }: Props) {
               placeholderTextColor="#9aa3af"
               value={adjustText}
               onChangeText={setAdjustText}
-              keyboardType={Platform.select({ ios: 'numbers-and-punctuation', android: 'numeric' })}
+              keyboardType={Platform.select({
+                ios: 'numbers-and-punctuation',
+                android: 'numeric',
+              })}
               autoFocus
               style={styles.input}
               returnKeyType="done"
@@ -356,8 +620,13 @@ export default function GameScreen({ navigation, route }: Props) {
             />
 
             <View style={styles.actionsRow}>
-              <Pressable onPress={() => setIsAdjustOpen(false)} style={[styles.btn, styles.btnGhost]}>
-                <Text style={[styles.btnText, styles.btnGhostText]}>Cancel</Text>
+              <Pressable
+                onPress={() => setIsAdjustOpen(false)}
+                style={[styles.btn, styles.btnGhost]}
+              >
+                <Text style={[styles.btnText, styles.btnGhostText]}>
+                  Cancel
+                </Text>
               </Pressable>
 
               {canShowUndo && (
@@ -367,7 +636,7 @@ export default function GameScreen({ navigation, route }: Props) {
                     onPress={undoLastForCurrentHand}
                     style={[styles.btn, styles.btnDanger]}
                   >
-                    <Text style={styles.btnText}>Ctrl + Z</Text>
+                    <Text style={styles.btnText}>Undo</Text>
                   </Pressable>
                 </>
               )}
@@ -376,35 +645,56 @@ export default function GameScreen({ navigation, route }: Props) {
               <Pressable
                 onPress={confirmAdjust}
                 disabled={!canConfirmAdjust}
-                style={[styles.btn, canConfirmAdjust ? styles.btnPrimary : styles.btnDisabled]}
+                style={[
+                  styles.btn,
+                  canConfirmAdjust
+                    ? styles.btnPrimary
+                    : styles.btnDisabled,
+                ]}
               >
-                <Text style={[styles.btnText, !canConfirmAdjust && styles.btnTextDisabled]}>Confirm</Text>
+                <Text
+                  style={[
+                    styles.btnText,
+                    !canConfirmAdjust && styles.btnTextDisabled,
+                  ]}
+                >
+                  Confirm
+                </Text>
               </Pressable>
             </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL: add points */}
       <Modal
         visible={isAddPointsOpen}
         transparent
         animationType="fade"
+        onShow={focusPointsInput}
         onRequestClose={() => setIsAddPointsOpen(false)}
       >
         <KeyboardAvoidingView
           style={styles.modalBackdrop}
-          behavior={Platform.select({ ios: 'padding', android: undefined })}
+          behavior={Platform.select({
+            ios: 'padding',
+            android: undefined,
+          })}
         >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Add points</Text>
 
             <TextInput
+              ref={r => {
+                pointsInputRef.current = r;
+              }}
               placeholder="e.g. 5  (use -3 to subtract)"
               placeholderTextColor="#9aa3af"
               value={pointsText}
               onChangeText={setPointsText}
-              keyboardType={Platform.select({ ios: 'numbers-and-punctuation', android: 'numeric' })}
+              keyboardType={Platform.select({
+                ios: 'numbers-and-punctuation',
+                android: 'numeric',
+              })}
               autoFocus
               style={styles.input}
               returnKeyType="done"
@@ -412,16 +702,33 @@ export default function GameScreen({ navigation, route }: Props) {
             />
 
             <View style={styles.actionsRow}>
-              <Pressable onPress={() => setIsAddPointsOpen(false)} style={[styles.btn, styles.btnGhost]}>
-                <Text style={[styles.btnText, styles.btnGhostText]}>Cancel</Text>
+              <Pressable
+                onPress={() => setIsAddPointsOpen(false)}
+                style={[styles.btn, styles.btnGhost]}
+              >
+                <Text style={[styles.btnText, styles.btnGhostText]}>
+                  Cancel
+                </Text>
               </Pressable>
               <View style={{ width: 10 }} />
               <Pressable
                 onPress={confirmAddPoints}
                 disabled={!canConfirmPoints}
-                style={[styles.btn, canConfirmPoints ? styles.btnPrimary : styles.btnDisabled]}
+                style={[
+                  styles.btn,
+                  canConfirmPoints
+                    ? styles.btnPrimary
+                    : styles.btnDisabled,
+                ]}
               >
-                <Text style={[styles.btnText, !canConfirmPoints && styles.btnTextDisabled]}>Confirm</Text>
+                <Text
+                  style={[
+                    styles.btnText,
+                    !canConfirmPoints && styles.btnTextDisabled,
+                  ]}
+                >
+                  Confirm
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -452,10 +759,13 @@ const styles = StyleSheet.create({
     minWidth: 150,
   },
   handText: { fontSize: 16, fontWeight: '600', color: '#374151' },
-
-  emptyHint: { textAlign: 'center', color: '#6b7280', marginTop: 8 },
   listContent: { paddingHorizontal: 16, paddingBottom: 24 },
-
+  emptyWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+  },
+  emptyHint: { textAlign: 'center', color: '#6b7280', marginTop: 8 },
   playerItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -472,20 +782,32 @@ const styles = StyleSheet.create({
   },
   playerDisabled: { backgroundColor: '#e5e7eb' },
   leftWrap: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  playerIndex: { width: 22, textAlign: 'right', marginRight: 8, color: '#6b7280' },
+  playerIndex: {
+    width: 22,
+    textAlign: 'right',
+    marginRight: 8,
+    color: '#6b7280',
+  },
   playerName: { fontSize: 16, fontWeight: '600', color: '#111827' },
   playerScore: { fontSize: 16, fontWeight: '700', color: '#111827' },
-
   headerRightRow: { flexDirection: 'row' },
-  headerBtn: {
+  kebabBtn: {
     paddingVertical: 6,
     paddingHorizontal: 10,
-    backgroundColor: '#2563eb',
+    backgroundColor: 'transparent',
     borderRadius: 999,
   },
+  kebabText: { fontSize: 22, lineHeight: 22, color: '#111827' },
   headerBtnMargin: { marginRight: 8 },
-  headerBtnText: { color: 'white', fontWeight: '700' },
-
+  footerWrap: { paddingTop: 6, paddingBottom: 24 },
+  footerBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  footerBtnText: { color: 'white', fontWeight: '700', fontSize: 16 },
   modalBackdrop: {
     flex: 1,
     backgroundColor: '#00000055',
@@ -493,7 +815,12 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   modalCard: { backgroundColor: 'white', borderRadius: 16, padding: 16 },
-  modalTitle: { fontSize: 18, fontWeight: '700', marginBottom: 10, color: '#111827' },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 10,
+    color: '#111827',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#e5e7eb',
@@ -503,13 +830,47 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#111827',
   },
-  actionsRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 14 },
+  actionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 14,
+  },
   btn: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10 },
   btnPrimary: { backgroundColor: '#2563eb' },
   btnDisabled: { backgroundColor: '#9ca3af' },
   btnDanger: { backgroundColor: '#ef4444' },
   btnTextDisabled: { color: '#e5e7eb' },
   btnText: { color: 'white', fontSize: 15, fontWeight: '700' },
-  btnGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#d1d5db' },
+  btnGhost: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
   btnGhostText: { color: '#374151' },
+  menuBackdrop: { position: 'absolute', inset: 0 },
+  menuContainer: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    alignItems: 'flex-end',
+  },
+  menuCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingVertical: 6,
+    minWidth: 180,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  menuItem: { paddingVertical: 10, paddingHorizontal: 14 },
+  menuItemText: {
+    fontSize: 15,
+    color: '#111827',
+    fontWeight: '600',
+  },
+  menuCancel: { color: '#6b7280', fontWeight: '700' },
+  menuDanger: { color: '#ef4444', fontWeight: '700' },
 });

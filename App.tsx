@@ -5,9 +5,9 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 // Importar las screens
-import HomeScreen from './src/screens/HomeScreen';
-import GameScreen from './src/screens/GameScreen';
-import HistoryScreen from './src/screens/HistoryScreen';
+import HomeScreen from './src/screens/HomeScreen/HomeScreen';
+import GameScreen from './src/screens/GameScreen/GameScreen';
+import HistoryScreen from './src/screens/HistoryScreen/HistoryScreen';
 
 // Tipado del stack (opcional, pero útil si usás TypeScript)
 type RootStackParamList = {

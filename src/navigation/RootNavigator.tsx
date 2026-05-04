@@ -2,9 +2,9 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { RootStackParamList } from './types';
 
-import HomeScreen from '../screens/HomeScreen';
-import GameScreen from '../screens/GameScreen';
-import HistoryScreen from '../screens/HistoryScreen';
+import HomeScreen from '../screens/HomeScreen/HomeScreen';
+import GameScreen from '../screens/GameScreen/GameScreen';
+import HistoryScreen from '../screens/HistoryScreen/HistoryScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 

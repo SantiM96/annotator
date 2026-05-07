@@ -1,6 +1,56 @@
 import { StyleSheet } from 'react-native';
 
 export const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f6f6f6' },
+  listContent: { padding: 16, gap: 12, flexGrow: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  text: { fontSize: 24, fontWeight: 'bold' },
+  emptyText: { fontSize: 16, color: '#666' },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e8e8e8',
+  },
+  gameName: { fontSize: 18, fontWeight: '700', color: '#111' },
+  meta: { marginTop: 4, fontSize: 13, color: '#666' },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  btn: {
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  btnPrimary: { backgroundColor: '#0b74de' },
+  btnDanger: { backgroundColor: '#d93939' },
+  btnText: { color: '#fff', fontWeight: '600' },
+  eventsWrap: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#efefef',
+  },
+  eventsHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  eventsTitle: { fontSize: 14, fontWeight: '700', color: '#222' },
+  eventsToggle: { fontSize: 13, fontWeight: '600', color: '#0b74de' },
+  handBlock: { marginTop: 8 },
+  handTitle: { fontSize: 13, fontWeight: '700', color: '#333' },
+  eventRow: {
+    marginTop: 3,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  eventPlayer: { fontSize: 13, color: '#555', flexShrink: 1 },
+  eventConnector: {
+    flex: 1,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ececec',
+    marginBottom: 3,
+  },
+  eventText: { fontSize: 13, color: '#555', textAlign: 'right' },
+  eventMutedText: { fontSize: 13, color: '#8a8a8a', textAlign: 'right' },
 });

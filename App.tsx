@@ -12,7 +12,7 @@ import HistoryScreen from './src/screens/HistoryScreen/HistoryScreen';
 // Tipado del stack (opcional, pero útil si usás TypeScript)
 type RootStackParamList = {
   Home: undefined;
-  Game: undefined;
+  Game: { resume?: boolean; gameId?: string } | undefined;
   History: undefined;
 };
 

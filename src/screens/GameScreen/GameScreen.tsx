@@ -17,8 +17,11 @@ import {
 import { styles } from './GameScreen.styles';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
+  getGameFromHistory,
   loadCurrentGame,
   saveCurrentGame,
+  saveGameToHistory,
+  type GameEvent,
   type GameSave,
 } from '../../storage/gameStorage';
 
@@ -32,13 +35,15 @@ import { AddPointsModal } from '../../components/modals/AddPointsModal';
 
 type RootStackParamList = {
   Home: undefined;
-  Game: { resume?: boolean } | undefined;
+  Game: { resume?: boolean; gameId?: string } | undefined;
   History: undefined;
 };
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Game'>;
 
 export default function GameScreen({ navigation, route }: Props) {
+  const [gameId, setGameId] = useState(() => `game-${Date.now()}`);
+  const [events, setEvents] = useState<GameEvent[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [isAddPlayerOpen, setIsAddPlayerOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -118,10 +123,22 @@ export default function GameScreen({ navigation, route }: Props) {
     setPlayers(prev =>
       prev.map(p => ({ ...p, score: 0, played: false, lost: false })),
     );
+    setEvents(prev => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random()}`,
+        type: 'reset',
+        hand,
+        playerId: 'system',
+        playerName: 'System',
+        delta: 0,
+        at: Date.now(),
+      },
+    ]);
     setHand(1);
     setHandDeltas({});
     setIsConfirmResetOpen(false);
-  }, []);
+  }, [hand]);
 
   const exitModes = useCallback(() => {
     setIsLostMode(false);
@@ -172,7 +189,9 @@ export default function GameScreen({ navigation, route }: Props) {
     let mounted = true;
     (async () => {
       if (route.params?.resume) {
-        const snapshot = await loadCurrentGame();
+        const snapshot = route.params.gameId
+          ? await getGameFromHistory(route.params.gameId)
+          : await loadCurrentGame();
         if (snapshot && mounted) {
           const restoredPlayers: Player[] = snapshot.players.map((p: any) => ({
             id: p.id,
@@ -182,10 +201,13 @@ export default function GameScreen({ navigation, route }: Props) {
             lost: typeof p.lost === 'boolean' ? p.lost : false,
           }));
 
+          setGameId(snapshot.id || `game-${Date.now()}`);
           setGameName(snapshot.gameName);
           setHand(snapshot.hand);
           setPlayers(restoredPlayers);
+          setEvents(Array.isArray(snapshot.events) ? snapshot.events : []);
           setHandDeltas({});
+          saveCurrentGame(snapshot).catch(() => {});
         }
       }
     })();
@@ -196,9 +218,11 @@ export default function GameScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     const snapshot: GameSave = {
+      id: gameId,
       gameName,
       hand,
       players,
+      events,
       savedAt: Date.now(),
     };
     if (
@@ -207,8 +231,20 @@ export default function GameScreen({ navigation, route }: Props) {
       gameName.startsWith('Game ') === false
     ) {
       saveCurrentGame(snapshot).catch(() => {});
+      saveGameToHistory(snapshot).catch(() => {});
     }
-  }, [players, hand, gameName]);
+  }, [players, hand, gameName, gameId, events]);
+
+  const pushEvent = useCallback((event: Omit<GameEvent, 'id' | 'at'>) => {
+    setEvents(prev => [
+      ...prev,
+      {
+        ...event,
+        id: `${Date.now()}-${Math.random()}`,
+        at: Date.now(),
+      },
+    ]);
+  }, []);
 
   const confirmAddPlayer = () => {
     if (!canConfirmPlayer) return;
@@ -244,6 +280,13 @@ export default function GameScreen({ navigation, route }: Props) {
         score: copy[index].score + delta,
         played: true,
       };
+      pushEvent({
+        type: 'score',
+        hand,
+        playerId: copy[index].id,
+        playerName: copy[index].name,
+        delta,
+      });
 
       setHandDeltas(d => ({ ...d, [pid]: delta }));
 
@@ -261,7 +304,7 @@ export default function GameScreen({ navigation, route }: Props) {
 
       return copy;
     });
-  }, []);
+  }, [hand, pushEvent]);
 
   const confirmAddPoints = () => {
     if (!canConfirmPoints || selectedIndex === null) return;
@@ -371,6 +414,13 @@ export default function GameScreen({ navigation, route }: Props) {
         ...copy[adjustIndex],
         score: copy[adjustIndex].score + delta,
       };
+      pushEvent({
+        type: 'adjust',
+        hand,
+        playerId: copy[adjustIndex].id,
+        playerName: copy[adjustIndex].name,
+        delta,
+      });
       return copy;
     });
     setIsAdjustOpen(false);
@@ -390,6 +440,13 @@ export default function GameScreen({ navigation, route }: Props) {
         score: copy[adjustIndex].score - last,
         played: false,
       };
+      pushEvent({
+        type: 'undo',
+        hand,
+        playerId: copy[adjustIndex].id,
+        playerName: copy[adjustIndex].name,
+        delta: -last,
+      });
 
       const next = { ...handDeltas };
       delete next[pid];

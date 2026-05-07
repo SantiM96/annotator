@@ -1,17 +1,22 @@
 import { StyleSheet } from 'react-native';
 
 export const styles = StyleSheet.create({
-  playerCard: {
-    backgroundColor: 'white',
+  playerCardShell: {
     borderRadius: 12,
     marginBottom: 10,
     borderWidth: 1,
     borderColor: '#dfe3e8',
+    backgroundColor: 'white',
     elevation: 1.5,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
+  },
+  playerCard: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'white',
   },
   playerItem: {
     flexDirection: 'row',
@@ -30,6 +35,21 @@ export const styles = StyleSheet.create({
   },
   playerName: { fontSize: 16, fontWeight: '600', color: '#111827' },
   playerNameLost: { textDecorationLine: 'line-through', color: '#7f1d1d' },
+  expandHint: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: -6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  expandHintIcon: {
+    width: 12,
+    height: 12,
+    tintColor: '#6b7280',
+    resizeMode: 'contain',
+  },
   lostBadge: {
     marginLeft: 8,
     fontSize: 12,
@@ -41,13 +61,9 @@ export const styles = StyleSheet.create({
   historyWrap: {
     borderTopWidth: 1,
     borderTopColor: '#e3e7ed',
-    borderBottomWidth: 1,
-    borderBottomColor: '#d0d6de',
     paddingHorizontal: 14,
     paddingVertical: 8,
     backgroundColor: '#f7f9fc',
-    borderBottomLeftRadius: 25,
-    borderBottomRightRadius: 25,
   },
   historyAnimatedWrap: {
     overflow: 'hidden',

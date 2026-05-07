@@ -61,8 +61,6 @@ export default function GameScreen({ navigation, route }: Props) {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `Game ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
       now.getDate(),
-    )} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(
-      now.getSeconds(),
     )}`;
   });
 
@@ -75,7 +73,7 @@ export default function GameScreen({ navigation, route }: Props) {
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
 
   const [isConfirmResetOpen, setIsConfirmResetOpen] = useState(false);
-
+  
   const [isRemoveMode, setIsRemoveMode] = useState(false);
   const [isConfirmRemoveOpen, setIsConfirmRemoveOpen] = useState(false);
   const [removeIndex, setRemoveIndex] = useState<number | null>(null);

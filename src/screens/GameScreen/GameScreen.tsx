@@ -350,6 +350,16 @@ export default function GameScreen({ navigation, route }: Props) {
       };
 
       if (nextLost) {
+        pushEvent({
+          type: 'lost',
+          hand,
+          playerId: copy[index].id,
+          playerName: copy[index].name,
+          delta: 0,
+        });
+      }
+
+      if (nextLost) {
         setHandDeltas(d => {
           const next = { ...d };
           delete next[pid];
@@ -371,7 +381,7 @@ export default function GameScreen({ navigation, route }: Props) {
 
       return copy;
     });
-  }, []);
+  }, [hand, pushEvent]);
 
   const askRemovePlayer = useCallback((index: number) => {
     setRemoveIndex(index);
@@ -542,21 +552,44 @@ export default function GameScreen({ navigation, route }: Props) {
   const buildPlayerHandHistory = useCallback(
     (playerId: string) => {
       let running = 0;
-      const rows: Array<{ hand: number; before: number; delta: number | null; after: number }> = [];
+      let alreadyLost = false;
+      const rows: Array<{
+        hand: number;
+        before: number;
+        delta: number | null;
+        after: number;
+        lost: boolean;
+      }> = [];
       const maxHand = Math.max(1, hand);
       for (let handNum = 1; handNum <= maxHand; handNum += 1) {
         const handEvents = events.filter(
           e => e.playerId === playerId && e.hand === handNum,
         );
         const before = running;
+        const lostThisHand = handEvents.some(e => e.type === 'lost');
+
         if (handEvents.length === 0) {
-          rows.push({ hand: handNum, before, delta: null, after: before });
+          rows.push({
+            hand: handNum,
+            before,
+            delta: null,
+            after: before,
+            lost: alreadyLost,
+          });
           continue;
         }
+
         const delta = handEvents.reduce((acc, ev) => acc + ev.delta, 0);
         const after = before + delta;
-        rows.push({ hand: handNum, before, delta, after });
+        rows.push({
+          hand: handNum,
+          before,
+          delta,
+          after,
+          lost: alreadyLost || lostThisHand,
+        });
         running = after;
+        if (lostThisHand) alreadyLost = true;
       }
       return rows;
     },
@@ -680,4 +713,3 @@ export default function GameScreen({ navigation, route }: Props) {
     </View>
   );
 }
-

@@ -27,6 +27,7 @@ type Props = {
     before: number;
     delta: number | null;
     after: number;
+    lost: boolean;
   }>;
 };
 
@@ -204,9 +205,14 @@ export function PlayerItem({
               <View key={`${item.id}-hand-${row.hand}`} style={styles.historyRow}>
                 <Text style={styles.historyHand}>Hand {row.hand}:</Text>
                 <View style={styles.historyConnector} />
-                <Text style={styles.historyValue}>
-                  {row.before} + {row.delta === null ? 'empty' : row.delta} = {row.after}
-                </Text>
+                {row.lost ? (
+                  <Text style={styles.historyValueLost}>{row.after} Lost</Text>
+                ) : (
+                  <Text style={styles.historyValue}>
+                    {row.before} + {row.delta === null ? 'empty' : row.delta} ={' '}
+                    {row.after}
+                  </Text>
+                )}
               </View>
             ))}
           </View>

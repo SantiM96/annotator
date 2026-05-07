@@ -53,4 +53,6 @@ export const styles = StyleSheet.create({
   },
   eventText: { fontSize: 13, color: '#555', textAlign: 'right' },
   eventMutedText: { fontSize: 13, color: '#8a8a8a', textAlign: 'right' },
+  eventLostPlayer: { fontSize: 13, color: '#b42318', fontWeight: '700', flexShrink: 1 },
+  eventLostText: { fontSize: 13, color: '#b42318', textAlign: 'right', fontWeight: '700' },
 });

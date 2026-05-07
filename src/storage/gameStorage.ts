@@ -6,7 +6,7 @@ const HISTORY_KEY = 'HISTORY_v1';
 export type SavedPlayer = { id: string; name: string; score: number; played: boolean; lost: boolean };
 export type GameEvent = {
   id: string;
-  type: 'score' | 'adjust' | 'undo' | 'reset';
+  type: 'score' | 'adjust' | 'undo' | 'reset' | 'lost';
   hand: number;
   playerId: string;
   playerName: string;

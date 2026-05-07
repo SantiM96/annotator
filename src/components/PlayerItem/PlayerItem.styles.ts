@@ -82,4 +82,5 @@ export const styles = StyleSheet.create({
     marginBottom: 4,
   },
   historyValue: { fontSize: 12, color: '#4b5563' },
+  historyValueLost: { fontSize: 12, color: '#b42318', fontWeight: '700' },
 });

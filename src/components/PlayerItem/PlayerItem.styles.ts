@@ -1,19 +1,23 @@
 import { StyleSheet } from 'react-native';
 
 export const styles = StyleSheet.create({
-  playerItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  playerCard: {
     backgroundColor: 'white',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#dfe3e8',
     elevation: 1.5,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
+  },
+  playerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
   },
   playerDisabled: { backgroundColor: '#e5e7eb' },
   playerLost: { backgroundColor: '#fee2e2' },
@@ -34,4 +38,32 @@ export const styles = StyleSheet.create({
   },
   playerScore: { fontSize: 16, fontWeight: '700', color: '#111827' },
   playerScoreLost: { color: '#7f1d1d' },
+  historyWrap: {
+    borderTopWidth: 1,
+    borderTopColor: '#e3e7ed',
+    borderBottomWidth: 1,
+    borderBottomColor: '#d0d6de',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: '#f7f9fc',
+    borderBottomLeftRadius: 25,
+    borderBottomRightRadius: 25,
+  },
+  historyAnimatedWrap: {
+    overflow: 'hidden',
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    paddingVertical: 3,
+  },
+  historyHand: { fontSize: 12, fontWeight: '700', color: '#6b7280' },
+  historyConnector: {
+    flex: 1,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e6ebf1',
+    marginBottom: 4,
+  },
+  historyValue: { fontSize: 12, color: '#4b5563' },
 });

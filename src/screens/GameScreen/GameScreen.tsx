@@ -13,6 +13,8 @@ import {
   TextInput,
   FlatList,
   Keyboard,
+  Platform,
+  UIManager,
 } from 'react-native';
 import { styles } from './GameScreen.styles';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -79,8 +81,15 @@ export default function GameScreen({ navigation, route }: Props) {
   const [removeIndex, setRemoveIndex] = useState<number | null>(null);
 
   const [isLostMode, setIsLostMode] = useState(false);
+  const [expandedHistoryPlayerId, setExpandedHistoryPlayerId] = useState<string | null>(null);
 
   const pointsInputRef = useRef<TextInput | null>(null);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
 
   const canConfirmPlayer = useMemo(() => newName.trim().length > 0, [newName]);
 
@@ -261,12 +270,16 @@ export default function GameScreen({ navigation, route }: Props) {
   };
 
   const openAddPoints = useCallback((index: number) => {
+    const tappedPlayerId = players[index]?.id;
+    if (expandedHistoryPlayerId && expandedHistoryPlayerId !== tappedPlayerId) {
+      setExpandedHistoryPlayerId(null);
+    }
     if (players[index].played) return;
     if (players[index].lost) return;
     setSelectedIndex(index);
     setPointsText('');
     setIsAddPointsOpen(true);
-  }, [players]);
+  }, [players, expandedHistoryPlayerId]);
 
   const applyDeltaToPlayer = useCallback((index: number, delta: number) => {
     setPlayers(prev => {
@@ -317,10 +330,14 @@ export default function GameScreen({ navigation, route }: Props) {
   };
 
   const addZeroQuick = useCallback((index: number) => {
+    const tappedPlayerId = players[index]?.id;
+    if (expandedHistoryPlayerId && expandedHistoryPlayerId !== tappedPlayerId) {
+      setExpandedHistoryPlayerId(null);
+    }
     if (players[index]?.played) return;
     if (players[index]?.lost) return;
     applyDeltaToPlayer(index, 0);
-  }, [players, applyDeltaToPlayer]);
+  }, [players, applyDeltaToPlayer, expandedHistoryPlayerId]);
 
   const toggleLostForPlayer = useCallback((index: number) => {
     setPlayers(prev => {
@@ -468,9 +485,18 @@ export default function GameScreen({ navigation, route }: Props) {
         >
           <Text style={styles.footerBtnText}>＋ Add player</Text>
         </Pressable>
+        {expandedHistoryPlayerId !== null && (
+          <Pressable
+            onPress={() => setExpandedHistoryPlayerId(null)}
+            style={{ height: 220 }}
+          />
+        )}
       </View>
     ) : (
-      <View style={{ height: 12 }} />
+      <Pressable
+        onPress={() => setExpandedHistoryPlayerId(null)}
+        style={{ height: expandedHistoryPlayerId !== null ? 220 : 12 }}
+      />
     );
 
   const renderEmpty = () => (
@@ -499,6 +525,46 @@ export default function GameScreen({ navigation, route }: Props) {
     });
   };
 
+  const openPlayerHistory = useCallback((index: number, direction: 'down' | 'up') => {
+    const pid = players[index]?.id;
+    if (!pid) return;
+    setExpandedHistoryPlayerId(prev => {
+      if (direction === 'down') {
+        if (prev === pid) return prev;
+        return pid;
+      }
+      if (direction === 'up') {
+        if (prev === pid) return null;
+        return prev;
+      }
+      return prev;
+    });
+  }, [players]);
+
+  const buildPlayerHandHistory = useCallback(
+    (playerId: string) => {
+      let running = 0;
+      const rows: Array<{ hand: number; before: number; delta: number | null; after: number }> = [];
+      const maxHand = Math.max(1, hand);
+      for (let handNum = 1; handNum <= maxHand; handNum += 1) {
+        const handEvents = events.filter(
+          e => e.playerId === playerId && e.hand === handNum,
+        );
+        const before = running;
+        if (handEvents.length === 0) {
+          rows.push({ hand: handNum, before, delta: null, after: before });
+          continue;
+        }
+        const delta = handEvents.reduce((acc, ev) => acc + ev.delta, 0);
+        const after = before + delta;
+        rows.push({ hand: handNum, before, delta, after });
+        running = after;
+      }
+      return rows;
+    },
+    [events, hand],
+  );
+
   return (
     <View style={styles.container}>
       {(isLostMode || isRemoveMode) && (
@@ -515,7 +581,7 @@ export default function GameScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      <View style={styles.topRow}>
+      <Pressable style={styles.topRow} onPress={() => setExpandedHistoryPlayerId(null)}>
         {isEditingName ? (
           <TextInput
             value={gameName}
@@ -531,7 +597,7 @@ export default function GameScreen({ navigation, route }: Props) {
           </Pressable>
         )}
         <Text style={styles.handText}>Hand: {hand}</Text>
-      </View>
+      </Pressable>
 
       <FlatList
         contentContainerStyle={styles.listContent}
@@ -549,6 +615,9 @@ export default function GameScreen({ navigation, route }: Props) {
             onAddZeroQuick={addZeroQuick}
             onOpenAddPoints={openAddPoints}
             onOpenAdjust={openAdjust}
+            onShowPlayerHistory={openPlayerHistory}
+            isHistoryExpanded={expandedHistoryPlayerId === item.id}
+            handHistory={buildPlayerHandHistory(item.id)}
           />
         )}
         ListEmptyComponent={renderEmpty}
@@ -609,6 +678,8 @@ export default function GameScreen({ navigation, route }: Props) {
         onShowFocus={focusPointsInput}
         inputRef={pointsInputRef}
       />
+
     </View>
   );
 }
+

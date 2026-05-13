@@ -10,6 +10,7 @@ type Props = {
   onToggleRemoveMode: () => void;
   onRenameGame: () => void;
   onResetGame: () => void;
+  onReorderDealers: () => void;
   isLostMode: boolean;
   isRemoveMode: boolean;
 };
@@ -22,6 +23,7 @@ export function HeaderMenuModal({
   onToggleRemoveMode,
   onRenameGame,
   onResetGame,
+  onReorderDealers,
   isLostMode,
   isRemoveMode,
 }: Props) {
@@ -53,6 +55,10 @@ export function HeaderMenuModal({
 
           <Pressable onPress={onRenameGame} style={styles.menuItem}>
             <Text style={styles.menuItemText}>Rename game</Text>
+          </Pressable>
+
+          <Pressable onPress={onReorderDealers} style={styles.menuItem}>
+            <Text style={styles.menuItemText}>Reorder dealers</Text>
           </Pressable>
 
           <Pressable onPress={onResetGame} style={styles.menuItem}>

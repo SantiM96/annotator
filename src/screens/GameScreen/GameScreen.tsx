@@ -34,6 +34,7 @@ import { ConfirmResetModal } from '../../components/modals/ConfirmResetModal';
 import { AddPlayerModal } from '../../components/modals/AddPlayerModal';
 import { AdjustScoreModal } from '../../components/modals/AdjustScoreModal';
 import { AddPointsModal } from '../../components/modals/AddPointsModal';
+import { ReorderDealersModal } from '../../components/modals/ReorderDealersModal';
 
 type RootStackParamList = {
   Home: undefined;
@@ -47,6 +48,8 @@ export default function GameScreen({ navigation, route }: Props) {
   const [gameId, setGameId] = useState(() => `game-${Date.now()}`);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [dealerOrder, setDealerOrder] = useState<string[]>([]);
+  const [currentDealerId, setCurrentDealerId] = useState<string | null>(null);
   const [isAddPlayerOpen, setIsAddPlayerOpen] = useState(false);
   const [newName, setNewName] = useState('');
 
@@ -71,6 +74,7 @@ export default function GameScreen({ navigation, route }: Props) {
   const [adjustIndex, setAdjustIndex] = useState<number | null>(null);
 
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const [isReorderDealersOpen, setIsReorderDealersOpen] = useState(false);
 
   const [isConfirmResetOpen, setIsConfirmResetOpen] = useState(false);
   
@@ -111,6 +115,38 @@ export default function GameScreen({ navigation, route }: Props) {
     return players.every(p => p.score === 0);
   }, [players]);
 
+  const getNormalizedDealerOrder = useCallback(
+    (sourceOrder: string[], sourcePlayers: Player[]) => {
+      const valid = new Set(sourcePlayers.map(p => p.id));
+      const kept = sourceOrder.filter(id => valid.has(id));
+      const missing = sourcePlayers.map(p => p.id).filter(id => !kept.includes(id));
+      return [...kept, ...missing];
+    },
+    [],
+  );
+
+  const getNextDealerAfterRound = useCallback(
+    (
+      sourcePlayers: Player[],
+      sourceOrder: string[],
+      sourceCurrentDealerId: string | null,
+    ) => {
+      const normalized = getNormalizedDealerOrder(sourceOrder, sourcePlayers);
+      if (normalized.length === 0) {
+        return { order: normalized, dealerId: null as string | null };
+      }
+      const current = sourceCurrentDealerId ?? normalized[0];
+      const currentIndex = normalized.indexOf(current);
+      const safeCurrentIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = (safeCurrentIndex + 1) % normalized.length;
+      const nextCandidateId = normalized[nextIndex];
+      const nextCandidate = sourcePlayers.find(p => p.id === nextCandidateId);
+      const nextDealerId = nextCandidate?.lost ? current : nextCandidateId;
+      return { order: normalized, dealerId: nextDealerId };
+    },
+    [getNormalizedDealerOrder],
+  );
+
   const openAddPlayerModal = useCallback(() => {
     setIsHeaderMenuOpen(false);
     setIsAddPlayerOpen(true);
@@ -124,6 +160,11 @@ export default function GameScreen({ navigation, route }: Props) {
   const openConfirmReset = useCallback(() => {
     setIsHeaderMenuOpen(false);
     setIsConfirmResetOpen(true);
+  }, []);
+
+  const openReorderDealers = useCallback(() => {
+    setIsHeaderMenuOpen(false);
+    setIsReorderDealersOpen(true);
   }, []);
 
   const performReset = useCallback(() => {
@@ -213,6 +254,17 @@ export default function GameScreen({ navigation, route }: Props) {
           setHand(snapshot.hand);
           setPlayers(restoredPlayers);
           setEvents(Array.isArray(snapshot.events) ? snapshot.events : []);
+          const restoredDealerOrder = getNormalizedDealerOrder(
+            Array.isArray(snapshot.dealerOrder) ? snapshot.dealerOrder : [],
+            restoredPlayers,
+          );
+          setDealerOrder(restoredDealerOrder);
+          const restoredDealerId =
+            snapshot.currentDealerId &&
+            restoredDealerOrder.includes(snapshot.currentDealerId)
+              ? snapshot.currentDealerId
+              : restoredDealerOrder[0] ?? null;
+          setCurrentDealerId(restoredDealerId);
           setHandDeltas({});
           saveCurrentGame(snapshot).catch(() => {});
         }
@@ -221,7 +273,7 @@ export default function GameScreen({ navigation, route }: Props) {
     return () => {
       mounted = false;
     };
-  }, [route.params]);
+  }, [route.params, getNormalizedDealerOrder]);
 
   useEffect(() => {
     const snapshot: GameSave = {
@@ -230,6 +282,8 @@ export default function GameScreen({ navigation, route }: Props) {
       hand,
       players,
       events,
+      dealerOrder,
+      currentDealerId,
       savedAt: Date.now(),
     };
     if (
@@ -240,7 +294,22 @@ export default function GameScreen({ navigation, route }: Props) {
       saveCurrentGame(snapshot).catch(() => {});
       saveGameToHistory(snapshot).catch(() => {});
     }
-  }, [players, hand, gameName, gameId, events]);
+  }, [players, hand, gameName, gameId, events, dealerOrder, currentDealerId]);
+
+  useEffect(() => {
+    setDealerOrder(prev => {
+      const next = getNormalizedDealerOrder(prev, players);
+      if (next.join(',') === prev.join(',')) return prev;
+      return next;
+    });
+    setCurrentDealerId(prev => {
+      if (players.length === 0) return null;
+      const playerIds = new Set(players.map(p => p.id));
+      if (prev && playerIds.has(prev)) return prev;
+      const normalized = getNormalizedDealerOrder(dealerOrder, players);
+      return normalized[0] ?? players[0]?.id ?? null;
+    });
+  }, [players, dealerOrder, getNormalizedDealerOrder]);
 
   const pushEvent = useCallback((event: Omit<GameEvent, 'id' | 'at'>) => {
     setEvents(prev => [
@@ -309,13 +378,16 @@ export default function GameScreen({ navigation, route }: Props) {
         copy.forEach(p => {
           if (!p.lost) p.played = false;
         });
+        const nextDealer = getNextDealerAfterRound(copy, dealerOrder, currentDealerId);
+        setDealerOrder(nextDealer.order);
+        setCurrentDealerId(nextDealer.dealerId);
         setHand(h => h + 1);
         setHandDeltas({});
       }
 
       return copy;
     });
-  }, [hand, pushEvent]);
+  }, [hand, pushEvent, getNextDealerAfterRound, dealerOrder, currentDealerId]);
 
   const confirmAddPoints = () => {
     if (!canConfirmPoints || selectedIndex === null) return;
@@ -375,13 +447,16 @@ export default function GameScreen({ navigation, route }: Props) {
         copy.forEach(p => {
           if (!p.lost) p.played = false;
         });
+        const nextDealer = getNextDealerAfterRound(copy, dealerOrder, currentDealerId);
+        setDealerOrder(nextDealer.order);
+        setCurrentDealerId(nextDealer.dealerId);
         setHand(h => h + 1);
         setHandDeltas({});
       }
 
       return copy;
     });
-  }, [hand, pushEvent]);
+  }, [hand, pushEvent, getNextDealerAfterRound, dealerOrder, currentDealerId]);
 
   const askRemovePlayer = useCallback((index: number) => {
     setRemoveIndex(index);
@@ -413,6 +488,9 @@ export default function GameScreen({ navigation, route }: Props) {
         copy.forEach(p => {
           if (!p.lost) p.played = false;
         });
+        const nextDealer = getNextDealerAfterRound(copy, dealerOrder, currentDealerId);
+        setDealerOrder(nextDealer.order);
+        setCurrentDealerId(nextDealer.dealerId);
         setHand(h => h + 1);
         setHandDeltas({});
       }
@@ -596,6 +674,16 @@ export default function GameScreen({ navigation, route }: Props) {
     [events, hand],
   );
 
+  const activeDealerPlayers = useMemo(
+    () => players.filter(p => !p.lost).map(p => ({ id: p.id, name: p.name })),
+    [players],
+  );
+
+  const currentDealerName = useMemo(() => {
+    const dealer = players.find(p => p.id === currentDealerId);
+    return dealer?.name ?? '-';
+  }, [players, currentDealerId]);
+
   return (
     <View style={styles.container}>
       {(isLostMode || isRemoveMode) && (
@@ -627,7 +715,13 @@ export default function GameScreen({ navigation, route }: Props) {
             <Text style={styles.gameName}>{gameName}</Text>
           </Pressable>
         )}
-        <Text style={styles.handText}>Hand: {hand}</Text>
+        <Pressable
+          onPress={openReorderDealers}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={{ alignItems: 'flex-end' }}
+        >
+          <Text style={styles.handText}>Dealer: {currentDealerName} (H{hand})</Text>
+        </Pressable>
       </Pressable>
 
       <FlatList
@@ -663,9 +757,26 @@ export default function GameScreen({ navigation, route }: Props) {
         onToggleRemoveMode={toggleRemoveMode}
         onRenameGame={startRenameGame}
         onResetGame={openConfirmReset}
+        onReorderDealers={openReorderDealers}
         isLostMode={isLostMode}
         isRemoveMode={isRemoveMode}
       />
+
+      {isReorderDealersOpen && (
+        <ReorderDealersModal
+          key={`reorder-dealers-${gameId}-${hand}`}
+          isOpen={isReorderDealersOpen}
+          onClose={() => setIsReorderDealersOpen(false)}
+          players={activeDealerPlayers}
+          initialOrder={dealerOrder}
+          initialDealerId={currentDealerId}
+          onSave={(nextOrder, nextDealerId) => {
+            setDealerOrder(nextOrder);
+            setCurrentDealerId(nextDealerId);
+            setIsReorderDealersOpen(false);
+          }}
+        />
+      )}
 
       <ConfirmRemovePlayerModal
         isOpen={isConfirmRemoveOpen}

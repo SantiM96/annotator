@@ -19,6 +19,8 @@ export type GameSave = {
   hand: number;
   players: SavedPlayer[];
   events: GameEvent[];
+  dealerOrder: string[];
+  currentDealerId: string | null;
   savedAt: number;
 };
 
@@ -37,6 +39,9 @@ export async function loadCurrentGame(): Promise<GameSave | null> {
       hand: typeof parsed.hand === 'number' ? parsed.hand : 1,
       players: Array.isArray(parsed.players) ? parsed.players : [],
       events: Array.isArray(parsed.events) ? (parsed.events as GameEvent[]) : [],
+      dealerOrder: Array.isArray(parsed.dealerOrder) ? parsed.dealerOrder : [],
+      currentDealerId:
+        typeof parsed.currentDealerId === 'string' ? parsed.currentDealerId : null,
       savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
     };
   } catch {
@@ -72,6 +77,8 @@ export async function getGameHistory(): Promise<GameSave[]> {
           }))
         : [],
       events: Array.isArray(g.events) ? (g.events as GameEvent[]) : [],
+      dealerOrder: Array.isArray(g.dealerOrder) ? g.dealerOrder : [],
+      currentDealerId: typeof g.currentDealerId === 'string' ? g.currentDealerId : null,
       savedAt: typeof g.savedAt === 'number' ? g.savedAt : Date.now(),
     }));
     return history.sort((a, b) => b.savedAt - a.savedAt);

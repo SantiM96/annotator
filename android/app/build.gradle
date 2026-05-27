@@ -83,7 +83,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "0.4.0"
+        versionName "0.5.0"
     }
     androidComponents {
         onVariants(selector().withBuildType("release")) { variant ->
@@ -109,7 +109,6 @@ android {
     }
     buildTypes {
         debug {
-            applicationIdSuffix ".debug"      // -> com.annotator.debug
             resValue "string", "app_name", "Annotator Dev"
         }
         release {

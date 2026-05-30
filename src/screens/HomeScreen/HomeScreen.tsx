@@ -52,6 +52,14 @@ export default function HomeScreen({ navigation }: { navigation: any }) {
         >
           <Text style={styles.btnText}>History</Text>
         </Pressable>
+
+        <Pressable
+          onPress={() => navigation.navigate('Options')}
+          android_ripple={{ color: '#00000022' }}
+          style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
+        >
+          <Text style={styles.btnText}>Options</Text>
+        </Pressable>
       </View>
     </View>
   );

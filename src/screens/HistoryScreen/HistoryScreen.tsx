@@ -7,6 +7,7 @@ import {
   saveCurrentGame,
   type GameSave,
 } from '../../storage/gameStorage';
+import { loadAppOptions } from '../../storage/optionsStorage';
 import { ConfirmDeleteHistoryGameModal } from '../../components/modals/ConfirmDeleteHistoryGameModal';
 
 function AnimatedHandLog({
@@ -70,9 +71,13 @@ function AnimatedHandLog({
                 <View key={ev.id} style={styles.eventRow}>
                   <Text style={styles.eventPlayer}>{ev.playerName}:</Text>
                   <View style={styles.eventConnector} />
-                  <Text style={styles.eventText}>
-                    {before} {operator} {ev.delta} = {after}
-                  </Text>
+                  {Number(handNum) === 1 ? (
+                    <Text style={styles.eventText}>{after}</Text>
+                  ) : (
+                    <Text style={styles.eventText}>
+                      {before} {operator} {ev.delta} = {after}
+                    </Text>
+                  )}
                 </View>
               );
             });
@@ -88,9 +93,13 @@ function AnimatedHandLog({
                   >
                     <Text style={styles.eventPlayer}>{p.name}:</Text>
                     <View style={styles.eventConnector} />
-                    <Text style={styles.eventMutedText}>
-                      {current} + empty = {current}
-                    </Text>
+                    {Number(handNum) === 1 ? (
+                      <Text style={styles.eventMutedText}>{current}</Text>
+                    ) : (
+                      <Text style={styles.eventMutedText}>
+                        {current} + empty = {current}
+                      </Text>
+                    )}
                   </View>
                 );
               });
@@ -140,8 +149,17 @@ export default function HistoryScreen({ navigation }: { navigation: any }) {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const loadHistory = useCallback(async () => {
-    const games = await getGameHistory();
-    setHistory(games);
+    const [games, options] = await Promise.all([
+      getGameHistory(),
+      loadAppOptions(),
+    ]);
+
+    const sortedGames = options.sortEnabled
+      ? [...games].sort((a, b) =>
+          options.sortDescending ? b.savedAt - a.savedAt : a.savedAt - b.savedAt,
+        )
+      : games;
+    setHistory(sortedGames);
   }, []);
 
   useEffect(() => {

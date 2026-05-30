@@ -11,7 +11,8 @@ import {
   Text,
   Pressable,
   TextInput,
-  FlatList,
+  ScrollView,
+  Animated,
   Keyboard,
   Platform,
   UIManager,
@@ -26,6 +27,7 @@ import {
   type GameEvent,
   type GameSave,
 } from '../../storage/gameStorage';
+import { loadAppOptions, type AppOptions } from '../../storage/optionsStorage';
 
 import { Player, PlayerItem } from '../../components/PlayerItem/PlayerItem';
 import { HeaderMenuModal } from '../../components/modals/HeaderMenuModal';
@@ -40,6 +42,7 @@ type RootStackParamList = {
   Home: undefined;
   Game: { resume?: boolean; gameId?: string } | undefined;
   History: undefined;
+  Options: undefined;
 };
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Game'>;
@@ -48,6 +51,7 @@ export default function GameScreen({ navigation, route }: Props) {
   const [gameId, setGameId] = useState(() => `game-${Date.now()}`);
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [displayPlayers, setDisplayPlayers] = useState<Player[]>([]);
   const [dealerOrder, setDealerOrder] = useState<string[]>([]);
   const [currentDealerId, setCurrentDealerId] = useState<string | null>(null);
   const [isAddPlayerOpen, setIsAddPlayerOpen] = useState(false);
@@ -68,6 +72,11 @@ export default function GameScreen({ navigation, route }: Props) {
   });
 
   const [handDeltas, setHandDeltas] = useState<Record<string, number>>({});
+  const [appOptions, setAppOptions] = useState<AppOptions>({
+    sortEnabled: false,
+    sortDescending: true,
+    burakoMode: false,
+  });
 
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [adjustText, setAdjustText] = useState('');
@@ -147,6 +156,31 @@ export default function GameScreen({ navigation, route }: Props) {
     [getNormalizedDealerOrder],
   );
 
+  const sortPlayersByOptions = useCallback(
+    (sourcePlayers: Player[], options: AppOptions) => {
+      if (!options.sortEnabled) return sourcePlayers;
+      const originalIndexById = new Map(
+        sourcePlayers.map((p, idx) => [p.id, idx] as const),
+      );
+      const sorted = [...sourcePlayers].sort((a, b) => {
+        const scoreCmp = options.sortDescending
+          ? b.score - a.score
+          : a.score - b.score;
+        if (scoreCmp !== 0) return scoreCmp;
+        return (
+          (originalIndexById.get(a.id) ?? 0) -
+          (originalIndexById.get(b.id) ?? 0)
+        );
+      });
+      return sorted;
+    },
+    [],
+  );
+
+  const reorderAnimValuesRef = useRef<Record<string, Animated.Value>>({});
+  const prevDisplayPlayersRef = useRef<Player[]>([]);
+  const ROW_ESTIMATED_HEIGHT = 86;
+
   const openAddPlayerModal = useCallback(() => {
     setIsHeaderMenuOpen(false);
     setIsAddPlayerOpen(true);
@@ -167,26 +201,22 @@ export default function GameScreen({ navigation, route }: Props) {
     setIsReorderDealersOpen(true);
   }, []);
 
+  const openOptions = useCallback(() => {
+    setIsHeaderMenuOpen(false);
+    navigation.navigate('Options');
+  }, [navigation]);
+
   const performReset = useCallback(() => {
+    const nextGameId = `game-${Date.now()}`;
+    setGameId(nextGameId);
     setPlayers(prev =>
       prev.map(p => ({ ...p, score: 0, played: false, lost: false })),
     );
-    setEvents(prev => [
-      ...prev,
-      {
-        id: `${Date.now()}-${Math.random()}`,
-        type: 'reset',
-        hand,
-        playerId: 'system',
-        playerName: 'System',
-        delta: 0,
-        at: Date.now(),
-      },
-    ]);
+    setEvents([]);
     setHand(1);
     setHandDeltas({});
     setIsConfirmResetOpen(false);
-  }, [hand]);
+  }, []);
 
   const exitModes = useCallback(() => {
     setIsLostMode(false);
@@ -232,6 +262,53 @@ export default function GameScreen({ navigation, route }: Props) {
       title: 'Game',
     });
   }, [navigation, headerRightNode]);
+
+  useEffect(() => {
+    const loadOptions = async () => {
+      const nextOptions = await loadAppOptions();
+      setAppOptions(nextOptions);
+      setPlayers(prev => sortPlayersByOptions(prev, nextOptions));
+    };
+    loadOptions();
+    const unsubscribe = navigation.addListener('focus', loadOptions);
+    return unsubscribe;
+  }, [navigation, sortPlayersByOptions]);
+
+  useEffect(() => {
+    const previousPlayers = prevDisplayPlayersRef.current;
+    if (previousPlayers.length === 0) {
+      setDisplayPlayers(players);
+      prevDisplayPlayersRef.current = players;
+      return;
+    }
+
+    const oldIndexById = new Map(
+      previousPlayers.map((p, i) => [p.id, i] as const),
+    );
+    const nextValues: Record<string, Animated.Value> = {};
+
+    players.forEach((p, newIndex) => {
+      const oldIndex = oldIndexById.get(p.id);
+      const deltaRows = oldIndex === undefined ? 0 : oldIndex - newIndex;
+      const initialOffset = deltaRows * ROW_ESTIMATED_HEIGHT;
+      nextValues[p.id] = new Animated.Value(initialOffset);
+    });
+
+    reorderAnimValuesRef.current = nextValues;
+    setDisplayPlayers(players);
+    prevDisplayPlayersRef.current = players;
+
+    requestAnimationFrame(() => {
+      const anims = Object.values(nextValues).map(v =>
+        Animated.timing(v, {
+          toValue: 0,
+          duration: 350,
+          useNativeDriver: true,
+        }),
+      );
+      Animated.parallel(anims).start();
+    });
+  }, [players]);
 
   useEffect(() => {
     let mounted = true;
@@ -378,16 +455,52 @@ export default function GameScreen({ navigation, route }: Props) {
         copy.forEach(p => {
           if (!p.lost) p.played = false;
         });
+        const sortedCopy = sortPlayersByOptions(copy, appOptions);
         const nextDealer = getNextDealerAfterRound(copy, dealerOrder, currentDealerId);
         setDealerOrder(nextDealer.order);
         setCurrentDealerId(nextDealer.dealerId);
         setHand(h => h + 1);
         setHandDeltas({});
+        return sortedCopy;
       }
 
       return copy;
     });
-  }, [hand, pushEvent, getNextDealerAfterRound, dealerOrder, currentDealerId]);
+  }, [
+    hand,
+    pushEvent,
+    getNextDealerAfterRound,
+    dealerOrder,
+    currentDealerId,
+    appOptions,
+    sortPlayersByOptions,
+  ]);
+
+  useEffect(() => {
+    if (!appOptions.burakoMode) return;
+    if (players.length < 2) return;
+
+    const activePlayers = players.filter(p => !p.lost);
+    if (activePlayers.length < 2) return;
+
+    const unplayedActive = activePlayers.filter(p => !p.played);
+    if (unplayedActive.length !== 1) return;
+
+    const hasAnyAssignedThisRound = activePlayers.some(
+      p => p.played || typeof handDeltas[p.id] === 'number',
+    );
+    if (!hasAnyAssignedThisRound) return;
+
+    const target = unplayedActive[0];
+    const targetIndex = players.findIndex(p => p.id === target.id);
+    if (targetIndex < 0) return;
+
+    const sumOthers = activePlayers
+      .filter(p => p.id !== target.id)
+      .reduce((acc, p) => acc + (handDeltas[p.id] ?? 0), 0);
+
+    applyDeltaToPlayer(targetIndex, -sumOthers);
+  }, [appOptions.burakoMode, players, handDeltas, applyDeltaToPlayer]);
 
   const confirmAddPoints = () => {
     if (!canConfirmPoints || selectedIndex === null) return;
@@ -447,16 +560,26 @@ export default function GameScreen({ navigation, route }: Props) {
         copy.forEach(p => {
           if (!p.lost) p.played = false;
         });
+        const sortedCopy = sortPlayersByOptions(copy, appOptions);
         const nextDealer = getNextDealerAfterRound(copy, dealerOrder, currentDealerId);
         setDealerOrder(nextDealer.order);
         setCurrentDealerId(nextDealer.dealerId);
         setHand(h => h + 1);
         setHandDeltas({});
+        return sortedCopy;
       }
 
       return copy;
     });
-  }, [hand, pushEvent, getNextDealerAfterRound, dealerOrder, currentDealerId]);
+  }, [
+    hand,
+    pushEvent,
+    getNextDealerAfterRound,
+    dealerOrder,
+    currentDealerId,
+    appOptions,
+    sortPlayersByOptions,
+  ]);
 
   const askRemovePlayer = useCallback((index: number) => {
     setRemoveIndex(index);
@@ -488,11 +611,13 @@ export default function GameScreen({ navigation, route }: Props) {
         copy.forEach(p => {
           if (!p.lost) p.played = false;
         });
+        const sortedCopy = sortPlayersByOptions(copy, appOptions);
         const nextDealer = getNextDealerAfterRound(copy, dealerOrder, currentDealerId);
         setDealerOrder(nextDealer.order);
         setCurrentDealerId(nextDealer.dealerId);
         setHand(h => h + 1);
         setHandDeltas({});
+        return sortedCopy;
       }
 
       return copy;
@@ -638,7 +763,10 @@ export default function GameScreen({ navigation, route }: Props) {
         after: number;
         lost: boolean;
       }> = [];
-      const maxHand = Math.max(1, hand);
+      const hasCurrentHandEvent = events.some(
+        e => e.playerId === playerId && e.hand === hand,
+      );
+      const maxHand = hasCurrentHandEvent ? hand : Math.max(0, hand - 1);
       for (let handNum = 1; handNum <= maxHand; handNum += 1) {
         const handEvents = events.filter(
           e => e.playerId === playerId && e.hand === handNum,
@@ -724,30 +852,40 @@ export default function GameScreen({ navigation, route }: Props) {
         </Pressable>
       </Pressable>
 
-      <FlatList
-        contentContainerStyle={styles.listContent}
-        data={players}
-        keyExtractor={p => p.id}
-        extraData={players.map(p => `${p.played}-${p.lost}`).join(',')}
-        renderItem={({ item, index }) => (
-          <PlayerItem
-            item={item}
-            index={index}
-            isRemoveMode={isRemoveMode}
-            isLostMode={isLostMode}
-            onAskRemovePlayer={askRemovePlayer}
-            onToggleLostForPlayer={toggleLostForPlayer}
-            onAddZeroQuick={addZeroQuick}
-            onOpenAddPoints={openAddPoints}
-            onOpenAdjust={openAdjust}
-            onShowPlayerHistory={openPlayerHistory}
-            isHistoryExpanded={expandedHistoryPlayerId === item.id}
-            handHistory={buildPlayerHandHistory(item.id)}
-          />
-        )}
-        ListEmptyComponent={renderEmpty}
-        ListFooterComponent={renderFooter}
-      />
+      <ScrollView contentContainerStyle={styles.listContent}>
+        {displayPlayers.length === 0
+          ? renderEmpty()
+          : displayPlayers.map((item, index) => (
+              <Animated.View
+                key={item.id}
+                style={{
+                  transform: [
+                    {
+                      translateY:
+                        reorderAnimValuesRef.current[item.id] ??
+                        new Animated.Value(0),
+                    },
+                  ],
+                }}
+              >
+                <PlayerItem
+                  item={item}
+                  index={index}
+                  isRemoveMode={isRemoveMode}
+                  isLostMode={isLostMode}
+                  onAskRemovePlayer={askRemovePlayer}
+                  onToggleLostForPlayer={toggleLostForPlayer}
+                  onAddZeroQuick={addZeroQuick}
+                  onOpenAddPoints={openAddPoints}
+                  onOpenAdjust={openAdjust}
+                  onShowPlayerHistory={openPlayerHistory}
+                  isHistoryExpanded={expandedHistoryPlayerId === item.id}
+                  handHistory={buildPlayerHandHistory(item.id)}
+                />
+              </Animated.View>
+            ))}
+        {renderFooter()}
+      </ScrollView>
 
       <HeaderMenuModal
         isOpen={isHeaderMenuOpen}
@@ -758,6 +896,7 @@ export default function GameScreen({ navigation, route }: Props) {
         onRenameGame={startRenameGame}
         onResetGame={openConfirmReset}
         onReorderDealers={openReorderDealers}
+        onOpenOptions={openOptions}
         isLostMode={isLostMode}
         isRemoveMode={isRemoveMode}
       />

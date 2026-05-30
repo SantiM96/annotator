@@ -62,7 +62,8 @@ export const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e3e7ed',
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingTop: 8,
+    paddingBottom: 15,
     backgroundColor: '#f7f9fc',
   },
   historyAnimatedWrap: {

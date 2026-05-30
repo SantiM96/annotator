@@ -57,7 +57,7 @@ export function PlayerItem({
   const animatedHeight = useRef(new Animated.Value(0)).current;
   const animatedRotation = useRef(new Animated.Value(0)).current;
   const targetHeight = useMemo(
-    () => Math.max(0, handHistory.length * 22 + 12),
+    () => Math.max(0, handHistory.length * 22 + 20),
     [handHistory.length],
   );
 
@@ -207,6 +207,8 @@ export function PlayerItem({
                 <View style={styles.historyConnector} />
                 {row.lost ? (
                   <Text style={styles.historyValueLost}>{row.after} Lost</Text>
+                ) : row.hand === 1 ? (
+                  <Text style={styles.historyValue}>{row.after}</Text>
                 ) : (
                   <Text style={styles.historyValue}>
                     {row.before} + {row.delta === null ? 'empty' : row.delta} ={' '}

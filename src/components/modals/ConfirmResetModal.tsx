@@ -23,7 +23,8 @@ export function ConfirmResetModal({ isOpen, onClose, onConfirm }: Props) {
         <View style={sharedModalStyles.modalCard}>
           <Text style={sharedModalStyles.modalTitle}>Reset game?</Text>
           <Text style={{ color: '#374151', marginBottom: 10 }}>
-            This will set Hand to 1 and all scores to 0.
+            This will set Hand to 1 and all scores to 0. The current game will
+            be saved to history.
           </Text>
 
           <View style={sharedModalStyles.actionsRow}>
